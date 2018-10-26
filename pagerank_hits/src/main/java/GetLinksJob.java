@@ -1,18 +1,16 @@
 import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.lib.output.MultipleOutputs;
+import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.util.Waitable;
@@ -31,27 +29,7 @@ import java.util.zip.Inflater;
 // На вход - id+base64(gzip(html))
 // На выход - id->ids from urls.txt
 public class GetLinksJob extends Configured implements Tool {
-    public static class NodeWritable implements Writable{
-        double weight;
-        ArrayList<String> linksOut = new ArrayList<>();
-        @Override
-        public void readFields(DataInput in) throws IOException{
-            String[] data = in.toString().split(" ");
-            weight = Double.parseDouble(data[0]);
-            for (int i = 1; i < data.length; i++){
-                linksOut.add(data[i]);
-            }
-        }
 
-        @Override
-        public void write(DataOutput out) throws IOException{
-            out.writeDouble(weight);
-            for (String link : linksOut) {
-                out.writeChars(" ");
-                out.writeChars(link);
-            }
-        }
-    }
 
     public static class LinkMapper extends Mapper<Text, Text, Text, Text> {
         HashMap<String, String> idToPage;
@@ -75,8 +53,6 @@ public class GetLinksJob extends Configured implements Tool {
 
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
-            //System.out.println(key.toString());
-            //System.out.println(value.toString());
             String line = value.toString().replace("\n", "");
             Base64.Decoder decoder = Base64.getDecoder();
             byte[] decodedByteArray = decoder.decode(line);
@@ -98,9 +74,10 @@ public class GetLinksJob extends Configured implements Tool {
             String regex = "\\<a\\s.*?href=(?:\\\"([\\w\\.:/?=&#%_\\-]*)\\\"|([^\\\"][\\w\\.:/?=&#%_\\-]*[^\\\"\\>])).*?\\>";
             Pattern parse_link = Pattern.compile(regex);
             Matcher match = parse_link.matcher(bos.toString(StandardCharsets.UTF_8.name()));
-            //LongWritable key_num = new LongWritable(Long.parseLong(lines[0]));
-            //LongWritable key_num = new LongWritable(Long.parseLong(key.toString()));
             Text key_num = new Text(idToPage.get(key.toString()));
+            Text linkForCount = new Text("LINKFORCOUNT");
+            context.write(key_num, linkForCount);
+
             while(match.find()){
                 String subSplit = match.group(0).split("href=")[1];
                 String[] finalSplit = subSplit.split("\"");
@@ -109,32 +86,56 @@ public class GetLinksJob extends Configured implements Tool {
                     if (!candidate.contains("http")){
                         candidate = "http://lenta.ru" + candidate;
                     }
-                    context.write(key_num, new Text(candidate.replace("www.","")));
+                    Text result = new Text(candidate.replace("www.",""));
+                    if (candidate.contains("lenta")){
+                        context.write(key_num, result); // From, to
+                        context.write(result, linkForCount); // For counts
+                    }
                 }
                 else{
                     String candidate = subSplit.trim();
-                    if (candidate.contains("http")){
+                    if (candidate.contains("http") & candidate.contains("lenta")){
                         Text result = new Text(candidate.split(" ")[0].replace(">","").replace("www.",""));
                         context.write(key_num, result);
+                        context.write(result, linkForCount); // For counts
                     }
-                    else if (!candidate.contains("http") & candidate.contains("www.")){
+                    else if (!candidate.contains("http") & candidate.contains("www.") & candidate.contains("lenta")){
                         candidate = "http://" + candidate;
                         Text result = new Text(candidate.split(" ")[0].replace(">","").replace("www.",""));
                         context.write(key_num, result);
+                        context.write(result, linkForCount); // For counts
                         }
                 }
             }
         }
     }
 
+
     public static class LinkReducer extends Reducer<Text, Text, Text, Text> {
+        String linkForCounter = "LINKFORCOUNT";
+        private MultipleOutputs<Text, Text> out;
+
+        @Override
+        protected void setup(Context context) throws IOException, InterruptedException{
+            out = new MultipleOutputs<>(context);
+        }
+
         @Override
         protected void reduce(Text key, Iterable<Text> text, Context context) throws IOException, InterruptedException {
+            HashMap<String, Boolean> localUniqueLinks = new HashMap<>();
             String links = "";
+            //System.out.println(key.toString());
+            out.write("unique",key, new Text(""), "unique");
             for (Text i:text){
-                links += i.toString() + " ";
+                String link = i.toString();
+                if (!localUniqueLinks.containsKey(link) & !link.equals(linkForCounter)) {
+                    localUniqueLinks.put(i.toString(), Boolean.TRUE);
+                    links += i.toString() + " ";
+                }
             }
+                //System.out.println(links.trim());
             context.write(key, new Text(links.trim()));
+
         }
     }
 
@@ -149,13 +150,17 @@ public class GetLinksJob extends Configured implements Tool {
         FileOutputFormat.setOutputPath(job, new Path(output));
 
         job.setMapperClass(LinkMapper.class);
-        //job.setCombinerClass(LinkReducer.class);
         job.setReducerClass(LinkReducer.class);
-
+        job.setNumReduceTasks(10);
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(Text.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(Text.class);
+
+        //MultipleOutputs.addNamedOutput(job, "links", TextOutputFormat.class,
+          //      Text.class, Text.class);
+        MultipleOutputs.addNamedOutput(job, "unique", TextOutputFormat.class,
+                Text.class, Text.class);
 
         return job;
     }
