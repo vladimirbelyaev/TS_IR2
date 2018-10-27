@@ -125,7 +125,7 @@ public class GetLinksJob extends Configured implements Tool {
             HashMap<String, Boolean> localUniqueLinks = new HashMap<>();
             String links = "";
             //System.out.println(key.toString());
-            out.write("unique",key, new Text(""), "unique");
+            out.write("unique",key, new Text("-1"), "unique");
             for (Text i:text){
                 String link = i.toString();
                 if (!localUniqueLinks.containsKey(link) & !link.equals(linkForCounter)) {
