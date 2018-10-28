@@ -59,17 +59,17 @@ public class PageRankJob extends Configured implements Tool {
         }
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
-            context.write(key, value);
             PageRankNode nodeIn = PageRankNode.read(value.toString());
             PageRankNode nodeOut = new PageRankNode();
-            nodeIn.weight = nodeIn.weight + avgLeak;
+            nodeIn.weightOut = nodeIn.weightOut + avgLeak *(1 - alpha); // Fixes PR leak
             System.out.println(key.toString() + "\t" + value.toString());
             if (nodeIn.linksOut.size() == 0){
                 System.out.println(hangingLink.toString() + " " + key.toString());
-                context.write(hangingLink, nodeIn.toText());
+                context.write(hangingLink, nodeIn.toText()); // Put hanging link
             }
             else{
-                nodeOut.weight = nodeIn.weight/nodeIn.linksOut.size();
+                nodeOut.weightOut = nodeIn.weightOut/nodeIn.linksOut.size();
+                context.write(key, value); // Write structure
                 for (String i: nodeIn.linksOut){
                     context.write(new Text(i), nodeOut.toText());
                 }
@@ -101,7 +101,7 @@ public class PageRankJob extends Configured implements Tool {
                 // Записать отдельно
                 PageRankNode node = new PageRankNode();
                 for (Text i: data){
-                    node.weight += PageRankNode.read(i.toString()).weight;
+                    node.weightOut += PageRankNode.read(i.toString()).weightOut;
                 }
                 out.write("leak", key, node.toText(), "leak");
             }
@@ -110,13 +110,13 @@ public class PageRankJob extends Configured implements Tool {
                 for (Text i: data){
                     PageRankNode curNode = PageRankNode.read(i.toString());
                     if (curNode.linksOut.size() == 0){
-                        node.weight += curNode.weight;
+                        node.weightOut += curNode.weightOut;
                     }
                     else{
                         node.linksOut = curNode.linksOut;
                     }
                 }
-                node.weight = node.weight * (1 - alpha) + alpha * 1.0 / N;
+                node.weightOut = node.weightOut * (1 - alpha) + alpha * 1.0 / N;
                 context.write(key, node.toText());
             }
 

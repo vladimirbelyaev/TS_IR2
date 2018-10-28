@@ -1,9 +1,6 @@
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.DoubleWritable;
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.LongWritable;
-import org.apache.hadoop.io.Text;
+import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -14,6 +11,7 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 public class SortJob extends Configured implements Tool {
     public static class SortMapper extends Mapper<LongWritable, Text, DoubleWritable, Text> {
@@ -22,6 +20,23 @@ public class SortJob extends Configured implements Tool {
             String[] keyVal = value.toString().split("\t");
             double mass = Double.parseDouble(keyVal[1].split(" ")[0]);
             context.write(new DoubleWritable(mass), new Text(keyVal[0]));
+        }
+    }
+
+    public static class DoubleComparator extends WritableComparator {
+
+        public DoubleComparator() {
+            super(DoubleWritable.class);
+        }
+
+        @Override
+        public int compare(byte[] b1, int s1, int l1,
+                           byte[] b2, int s2, int l2) {
+
+            Double v1 = ByteBuffer.wrap(b1, s1, l1).getDouble();
+            Double v2 = ByteBuffer.wrap(b2, s2, l2).getDouble();
+
+            return v1.compareTo(v2) * (-1);
         }
     }
 
@@ -45,7 +60,8 @@ public class SortJob extends Configured implements Tool {
 
         job.setMapperClass(SortMapper.class);
         job.setReducerClass(SortReducer.class);
-        job.setNumReduceTasks(10);
+        job.setSortComparatorClass(DoubleComparator.class);
+        job.setNumReduceTasks(1);
         job.setMapOutputKeyClass(DoubleWritable.class);
         job.setMapOutputValueClass(Text.class);
         job.setOutputKeyClass(Text.class);
