@@ -1,15 +1,10 @@
-import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.MultipleInputs;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.MultipleOutputs;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
@@ -33,39 +28,30 @@ public class InitPageRankJob extends Configured implements Tool {
         }
     }
     public static class InitPageRankReducer extends Reducer<Text, Text, Text, Text> {
-        public long getN(Reducer.Context context)throws IOException, InterruptedException {
-            Path unique_file = new Path("hw_pagerank/unique/part-r-00000");
-            FileSystem fs = unique_file.getFileSystem(context.getConfiguration());
-            BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(unique_file)));
-            String line = br.readLine();
-            long N = Long.parseLong(line.split("\t")[1]);
-            br.close();
-            return N;
-        }
-        String mass;
+
+        Double mass;
         private MultipleOutputs<Text, Text> out;
 
         @Override
         protected void setup(Context context) throws IOException, InterruptedException{
             // Здесь надо прописать N
-            mass = Double.toString(1.0/getN(context));
+            Path pathToUnique = new Path("hw_pagerank/unique/part-r-00000");
+            mass = 1.0/PageRankNode.getN(context, pathToUnique);
             out = new MultipleOutputs<>(context);
+            String zeroValue = "0.0<SPLITTER>0.0<SPLITTER>";
+            out.write("leak", new Text("HANGING_LINK"), new Text(zeroValue), "leak");
 
         }
         @Override
         protected void reduce(Text key, Iterable<Text> text, Context context) throws IOException, InterruptedException {
             int counter = 0;
             for (Text i:text){
+                PageRankNode node = PageRankNode.read(i.toString(), false);
                 counter += 1;
-                if (!i.toString().equals("")) {
-                    context.write(key, new Text(mass + " " + i.toString()));
-                }
-                else{
-                    context.write(key, new Text(mass));
-                }
+                node.weightOut = mass;
+                context.write(key, node.toText(false));
             }
             assert (counter == 1);
-            out.write("leak", new Text("HANGING_LINK"), new Text("0.0"), "leak");
         }
     }
 

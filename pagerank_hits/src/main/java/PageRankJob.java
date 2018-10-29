@@ -1,17 +1,14 @@
-import org.apache.commons.io.output.ByteArrayOutputStream;
+import org.apache.commons.io.filefilter.RegexFileFilter;
 import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.fs.FSDataInputStream;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.*;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.MultipleInputs;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.mapreduce.lib.output.MultipleOutputs;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
@@ -19,7 +16,6 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
 import java.io.*;
-import java.util.ArrayList;
 
 /* Логика работы:
 Файлы с весами отдельно, структура отдельно.
@@ -35,43 +31,50 @@ public class PageRankJob extends Configured implements Tool {
         final Text hangingLink = new Text("HANGING_LINK");
         double avgLeak = 0;
 
-        public long getN(JobContext context)throws IOException, InterruptedException{
-            Path urls = new Path("hw_pagerank/unique/part-r-00000");
-            FileSystem fs = urls.getFileSystem(context.getConfiguration());
-            BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(urls)));
-            String curLine = br.readLine();
-            long N = Long.parseLong(curLine.split("\t")[1]);
-            br.close();
-            return N;
-        }
-
         @Override
-        protected void setup(Context context) throws IOException, InterruptedException{
-            N = getN(context);
-            String[] dirName = ((FileSplit) context.getInputSplit()).getPath().getParent().getName().split("/");
-            String fileName =  "/user/v.belyaev/hw_pagerank/" + dirName[dirName.length - 1] + "/leak-r-00000";
-            Path leakFile = new Path(fileName);
-            FileSystem fs = leakFile.getFileSystem(context.getConfiguration());
+        protected void setup(Context context) throws IOException, InterruptedException, NullPointerException{
+            Path pathToUnique = new Path("hw_pagerank/unique/part-r-00000");
+            N = PageRankNode.getN(context, pathToUnique);
+
+            FileSystem fs = ((FileSplit) context.getInputSplit()).getPath().getFileSystem(context.getConfiguration());
+            String parentName = ((FileSplit) context.getInputSplit()).getPath().getParent().getName();
+            Path dirPath = new Path("hw_pagerank/PageRank/" + parentName);
+            FileStatus dirStat = fs.getFileStatus(dirPath);
+            if (!dirStat.isDirectory()){
+                throw new InterruptedException(dirStat.toString() + " is not a directory");
+            }
+            Path leakFile = new Path(" ");
+            for (FileStatus fStatus :fs.listStatus(dirPath)){
+                System.out.println(fStatus.toString());
+                if (fStatus.getPath().toString().contains("leak")){
+                    leakFile = new Path(fStatus.getPath().toString());
+                }
+            }
+            if (leakFile.toString().equals(" ")){
+                throw new InterruptedException("Leakfile is null");
+            }
+
+            fs = leakFile.getFileSystem(context.getConfiguration());
             BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(leakFile)));
             String curLine = br.readLine().trim();
-            double leakedPR =  Double.parseDouble(curLine.split("\t")[1]);
+            double leakedPR =  Double.parseDouble(curLine.split("<SPLITTER>")[0].split("\t")[1]);
             avgLeak = leakedPR/N;
         }
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
-            PageRankNode nodeIn = PageRankNode.read(value.toString());
+            PageRankNode nodeIn = PageRankNode.read(value.toString(), false);
             PageRankNode nodeOut = new PageRankNode();
             nodeIn.weightOut = nodeIn.weightOut + avgLeak *(1 - alpha); // Fixes PR leak
             System.out.println(key.toString() + "\t" + value.toString());
             if (nodeIn.linksOut.size() == 0){
                 System.out.println(hangingLink.toString() + " " + key.toString());
-                context.write(hangingLink, nodeIn.toText()); // Put hanging link
+                context.write(hangingLink, nodeIn.toText(false)); // Put hanging link
             }
             else{
                 nodeOut.weightOut = nodeIn.weightOut/nodeIn.linksOut.size();
-                context.write(key, value); // Write structure
+                context.write(key, nodeIn.toText(false)); // Write structure
                 for (String i: nodeIn.linksOut){
-                    context.write(new Text(i), nodeOut.toText());
+                    context.write(new Text(i), nodeOut.toText(false));
                 }
             }
         }
@@ -85,14 +88,8 @@ public class PageRankJob extends Configured implements Tool {
         protected void setup(Context context) throws IOException, InterruptedException{
             // Ставим multiple output
             out = new MultipleOutputs<>(context);
-
-            // Здесь надо прописать N
-            Path urls = new Path("hw_pagerank/unique/part-r-00000");
-            FileSystem fs = urls.getFileSystem(context.getConfiguration());
-            BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(urls)));
-            String curLine = br.readLine();
-            N = Long.parseLong(curLine.split("\t")[1]);
-            br.close();
+            Path pathToUnique = new Path("hw_pagerank/unique/part-r-00000");
+            N = PageRankNode.getN(context, pathToUnique);
         }
         @Override
         protected void reduce(Text key, Iterable<Text> data, Context context) throws IOException, InterruptedException {
@@ -101,14 +98,14 @@ public class PageRankJob extends Configured implements Tool {
                 // Записать отдельно
                 PageRankNode node = new PageRankNode();
                 for (Text i: data){
-                    node.weightOut += PageRankNode.read(i.toString()).weightOut;
+                    node.weightOut += PageRankNode.read(i.toString(), false).weightOut;
                 }
-                out.write("leak", key, node.toText(), "leak");
+                out.write("leak", key, node.toText(false), "leak");
             }
             else{
                 PageRankNode node = new PageRankNode();
                 for (Text i: data){
-                    PageRankNode curNode = PageRankNode.read(i.toString());
+                    PageRankNode curNode = PageRankNode.read(i.toString(), false);
                     if (curNode.linksOut.size() == 0){
                         node.weightOut += curNode.weightOut;
                     }
@@ -117,7 +114,7 @@ public class PageRankJob extends Configured implements Tool {
                     }
                 }
                 node.weightOut = node.weightOut * (1 - alpha) + alpha * 1.0 / N;
-                context.write(key, node.toText());
+                context.write(key, node.toText(false));
             }
 
         }
@@ -139,6 +136,7 @@ public class PageRankJob extends Configured implements Tool {
         job.setMapOutputValueClass(Text.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(Text.class);
+        job.setNumReduceTasks(8);
 
         return job;
     }

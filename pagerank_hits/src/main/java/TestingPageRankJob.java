@@ -1,56 +1,63 @@
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
 import java.io.IOException;
 
-public class WordCountJob extends Configured implements Tool {
-    public static class WordCountMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
-        static final IntWritable one = new IntWritable(1);
-        static final Text _key = new Text("1");
+public class TestingPageRankJob extends Configured implements Tool {
+    public static class TestPRMapper extends Mapper<LongWritable, Text, Text, DoubleWritable> {
+        static final Text _key = new Text("all");
+        static final Text _leak = new Text("potential_leak");
         @Override
         protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-            context.write(_key, one);
+            String data = value.toString().split("\t")[1];
+            PageRankNode node = PageRankNode.read(data, false);
+            DoubleWritable w = new DoubleWritable(node.weightOut);
+            context.write(_key, w);
+            if (node.linksOut.size() == 0){
+                context.write(_leak, w);
+            }
         }
     }
 
-    public static class WordCountReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+    public static class TestPRReducer extends Reducer<Text, DoubleWritable, Text, Text> {
         @Override
-        protected void reduce(Text word, Iterable<IntWritable> nums, Context context) throws IOException, InterruptedException {
-            int sum = 0;
-            for(IntWritable i: nums) {
+        protected void reduce(Text word, Iterable<DoubleWritable> nums, Context context) throws IOException, InterruptedException {
+            double sum = 0;
+            for(DoubleWritable i: nums) {
                 sum += i.get();
             }
 
             // produce pairs of "word" <-> amount
-            context.write(word, new IntWritable(sum));
+            context.write(word, new Text(Double.toString(sum)));
         }
     }
 
     private Job getJobConf(String input, String output) throws IOException {
         Job job = Job.getInstance(getConf());
-        job.setJarByClass(WordCountJob.class);
-        job.setJobName(WordCountJob.class.getCanonicalName());
+        job.setJarByClass(TestingPageRankJob.class);
+        job.setJobName(TestingPageRankJob.class.getCanonicalName());
 
         // will use traditional TextInputFormat to split line-by-line
         KeyValueTextInputFormat.addInputPath(job, new Path(input));
         FileOutputFormat.setOutputPath(job, new Path(output));
 
-        job.setMapperClass(WordCountMapper.class);
-        job.setReducerClass(WordCountReducer.class);
+        job.setMapperClass(TestPRMapper.class);
+        job.setReducerClass(TestPRReducer.class);
         job.setNumReduceTasks(1);
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(DoubleWritable.class);
         job.setOutputKeyClass(Text.class);
-        job.setOutputValueClass(IntWritable.class);
+        job.setOutputValueClass(Text.class);
 
         return job;
     }
@@ -62,7 +69,7 @@ public class WordCountJob extends Configured implements Tool {
     }
 
     static public void main(String[] args) throws Exception {
-        int ret = ToolRunner.run(new WordCountJob(), args);
+        int ret = ToolRunner.run(new TestingPageRankJob(), args);
         System.exit(ret);
     }
 }

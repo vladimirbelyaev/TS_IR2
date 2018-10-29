@@ -15,7 +15,7 @@ public class HITSJob extends Configured implements Tool {
     public static class HITSMapper extends Mapper<Text, Text, Text, Text> {
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
-            PageRankNode node = PageRankNode.readHITS(value.toString());
+            PageRankNode node = PageRankNode.read(value.toString(), true);
             context.write(key, new Text("s" + value.toString())); // Бросаем внутреннюю структуру
             for (String linkOut:node.linksOut){ // Страницы, на которые переходим
                 context.write(new Text(linkOut), new Text("h" + Double.toString(node.weightOut)));
@@ -57,22 +57,15 @@ public class HITSJob extends Configured implements Tool {
         protected void reduce(Text word, Iterable<Text> data, Context context) throws IOException, InterruptedException {
             System.out.println(word.toString());
             PageRankNode node = new PageRankNode();
-            long counter = 0;
-            boolean gotGraph = false;
             for(Text i: data) {
-                counter += 1;
-                if (counter % 10000 == 0){
-                    System.out.println(counter);
-                }
                 String info = i.toString();
                 String token = info.substring(0,1);
                 if (token.equals("s")){
                     System.out.println("Parsing graph");
-                    PageRankNode graphNode = PageRankNode.readHITS(info.substring(1));
+                    PageRankNode graphNode = PageRankNode.read(info.substring(1),true);
                     System.out.println("Graph parsed");
                     node.linksOut = graphNode.linksOut;
                     node.linksIn = graphNode.linksIn;
-                    gotGraph = true;
                 }
                 else if (token.equals("h")){
                     node.weightIn += Double.parseDouble(info.substring(1));
@@ -82,7 +75,7 @@ public class HITSJob extends Configured implements Tool {
                 }
             }
             System.out.println("Writing node");
-            context.write(word, node.toHITS());
+            context.write(word, node.toText(true));
             System.out.println("Node written");
         }
     }
@@ -113,7 +106,26 @@ public class HITSJob extends Configured implements Tool {
     }
 
     static public void main(String[] args) throws Exception {
-        int ret = ToolRunner.run(new HITSJob(), args);
+        String inputDirName = args[0]; // hw_pagerank/iter_
+        String outputDirName = args[1];
+        int nIter = Integer.parseInt(args[2]);
+
+        System.out.println("Starting iteration " + Integer.toString(0));
+        String[] modifiedArgs = new String[2];
+        modifiedArgs[0] = inputDirName + "/part-*";
+        modifiedArgs[1] = outputDirName + "/" + Integer.toString(0);
+        ToolRunner.run(new HITSJob(), modifiedArgs);
+
+
+        for (int i = 0; i < nIter - 1; i++){
+            modifiedArgs[0] = outputDirName + "/" + Integer.toString(i) + "/part-*";
+            modifiedArgs[1] = outputDirName + "/" + Integer.toString(i + 1);
+            System.out.println("Starting iteration " + Integer.toString(i));
+            ToolRunner.run(new HITSJob(), modifiedArgs);
+        }
+        modifiedArgs[0] = outputDirName + "/" + Integer.toString(nIter - 1) + "/part-*";
+        modifiedArgs[1] = outputDirName + "/" + "fin";
+        int ret = ToolRunner.run(new HITSJob(), modifiedArgs);
         System.exit(ret);
     }
 }
