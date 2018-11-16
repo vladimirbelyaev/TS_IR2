@@ -8,5 +8,5 @@ hadoop jar pagerank_hits.jar SortJobIn hw_pagerank/HITS/fin/part* hw_pagerank/HI
 echo "Calculating top by hubness"
 hadoop jar pagerank_hits.jar SortJobOut hw_pagerank/HITS/fin/part* hw_pagerank/HITS/resultH
 echo "Dumping"
-hdfs dfs -cat hw_pagerank/HITS/resultA/part* | head -n 30 >> authorityTop.txt
-hdfs dfs -cat hw_pagerank/HITS/resultH/part* | head -n 30 >> hubnessTop.txt
+hdfs dfs -cat hw_pagerank/HITS/resultA/part* | head -n 30 > authorityTop.txt
+hdfs dfs -cat hw_pagerank/HITS/resultH/part* | head -n 30 > hubnessTop.txt
