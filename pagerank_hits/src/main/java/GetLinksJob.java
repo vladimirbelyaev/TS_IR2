@@ -14,6 +14,8 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
 import java.io.*;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
@@ -46,7 +48,24 @@ public class GetLinksJob extends Configured implements Tool {
             }
             br.close();
         }
-
+        boolean checkURL(String urlstr) throws MalformedURLException {
+            URL urlurl;
+            try{
+                urlurl = new URL(urlstr);
+            }catch (MalformedURLException ex){
+                return false;
+            }
+            if (urlurl.getHost() == null){
+                return false;
+            }
+            if (!urlurl.getHost().equals("lenta.ru")){
+                return false;
+            }
+            /*if (urlstr.lastIndexOf("/lenta.ru") == -1){
+                return false;
+            }*/
+            return true;
+        }
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
             String line = value.toString().replace("\n", "");
@@ -86,9 +105,11 @@ public class GetLinksJob extends Configured implements Tool {
                     candidate = candidate.replace("www.","");
                     if (candidate.contains("lenta")){
                         candidate = candidate.replace("\n", "").replace("\\s+","");
-                        context.write(key_num, new Text("O" + candidate)); // From, to
-                        context.write(new Text(candidate), new Text("I" + keyString)); // To, from
-                        context.write(new Text(candidate), linkForCount); // For counts
+                        if (checkURL(candidate)) {
+                            context.write(key_num, new Text("O" + candidate)); // From, to
+                            context.write(new Text(candidate), new Text("I" + keyString)); // To, from
+                            context.write(new Text(candidate), linkForCount); // For counts
+                        }
                     }
                 }
                 else{
@@ -96,17 +117,21 @@ public class GetLinksJob extends Configured implements Tool {
                     if (candidate.contains("http") & candidate.contains("lenta")){
                         candidate = candidate.split(" ")[0].replace(">","").replace("www.","");
                         candidate = candidate.replace("\n", "").replace("\\s+","");
-                        context.write(key_num, new Text("O" + candidate)); // From, to
-                        context.write(new Text(candidate), new Text("I" + keyString)); // To, from
-                        context.write(new Text(candidate), linkForCount); // For counts
+                        if (checkURL(candidate)) {
+                            context.write(key_num, new Text("O" + candidate)); // From, to
+                            context.write(new Text(candidate), new Text("I" + keyString)); // To, from
+                            context.write(new Text(candidate), linkForCount); // For counts
+                        }
                     }
                     else if (!candidate.contains("http") & candidate.contains("www.") & candidate.contains("lenta")){
                         candidate = "http://" + candidate;
                         candidate = candidate.split(" ")[0].replace(">","").replace("www.","");
                         candidate = candidate.replace("\n", "").replace("\\s+","");
-                        context.write(key_num, new Text("O" + candidate)); // From, to
-                        context.write(new Text(candidate), new Text("I" + keyString)); // To, from
-                        context.write(new Text(candidate), linkForCount); // For counts
+                        if (checkURL(candidate)) {
+                            context.write(key_num, new Text("O" + candidate)); // From, to
+                            context.write(new Text(candidate), new Text("I" + keyString)); // To, from
+                            context.write(new Text(candidate), linkForCount); // For counts
+                        }
                     }
                 }
             }
